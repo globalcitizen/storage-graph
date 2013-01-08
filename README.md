@@ -9,7 +9,7 @@ unix platforms.
 
 Subsystems Supported
 --------------------
- * Linux physical devices (SATA-only at this stage)
+ * Linux physical devices (SATA and IDE-only at this stage)
  * DRBD (Linux Distributed Redundant Block Device; 'Network RAID1')
  * LVM2 (Linux Logical Volume Manager 2)
  * mdadm (Linux Software RAID)
