@@ -1,0 +1,269 @@
+#!/usr/bin/perl -s
+
+use Graph::Easy;
+use POSIX qw(ceil);
+use Number::Bytes::Human qw(format_bytes);
+
+# needs
+#  - unix-like environment
+#  - hdparm (disk size detection)
+#  - fdisk for linux (partition size detection)
+
+$graph = Graph::Easy->new();
+
+$physical = $graph->add_group('physical disks');
+
+add_md_arrays();
+
+@pvs = get_lvm2_pvs();
+foreach $pv (@pvs) {
+ $node = $graph->add_node($pv);
+# if($pv =~ /\/dev\/.*?\/.+/) {
+#  #print "(consider $pv?)\n";
+#  #add_vg_lvs(dirname($pv)); sorta thing?
+# }
+}
+
+#@vgs = get_lvm2_vgs();
+#foreach $vg (@vgs) {
+# $graph->add_node($vg);
+#}
+
+#@disks = ('sda','sdb');
+@disks = get_disks();
+
+# Physical Disks
+foreach $disk (@disks) {
+ $node = $graph->add_node($disk);
+ chop($size = `hdparm -I $disk |grep 'device size' |grep '('|tail -n 1 |cut -d '(' -f2 |cut -d ')' -f1 |sed 's/ *//g'|sed 's/000GB/TB/'`);
+ $node->set_attribute('label','disk'.'\r'.$disk.'\r('.$size.')');
+ $physical->add_member($node);
+}
+
+# Physical Disk Partitions
+foreach $disk (@disks) {
+ @disk_partitions = get_disk_partitions($disk);
+ foreach $disk_partition (@disk_partitions) {
+  #print "disk partition $disk_partition\n";
+  $node = $graph->add_node($disk_partition);
+  $physical->add_member($node);
+  # only works for mounted filesystems
+  chop($size = `df -hP |grep '^$disk_partition' |tail -n1 |cut -d ' ' -f2- |sed 's/^ *//' |cut -d ' ' -f1`);
+  # fall back to fdisk-based computation
+  if($size eq '') {
+   $size = get_disk_partition_size($disk,$disk_partition);
+  }
+  else {
+   # NOTE: could also show mounted fs type here
+  }
+  # doesn't actually work - lvm2 vg comes in as ext3
+  #$fs = get_disk_partition_detected_fs($disk,$disk_partition);
+  #if($fs ne '') { $size .= ' / ' . $fs; }
+  $node->set_attribute('label','partition\r'.$disk_partition.'\r('.$size.')');
+  $graph->add_edge_once($disk,$disk_partition);
+ }
+}
+
+add_drbd_resources();
+
+# old / testing
+#$graph->add_nodes('sda2','sdb2');
+#$graph->add_nodes('/dev/md/Storage');
+#$graph->add_edge_once('sda2','/dev/md/Storage');
+#$graph->add_edge_once('sdb2','/dev/md/Storage');
+#$graph->add_nodes('/dev/RedundantVolumeGroup');
+#$graph->add_edge_once('/dev/md/Storage','/dev/RedundantVolumeGroup');
+#($node) = $graph->add_nodes('/dev/RedundantVolumeGroup/DRBDContainer');
+#$graph->add_edge_once('/dev/RedundantVolumeGroup','/dev/RedundantVolumeGroup/DRBDContainer');
+#$node->set_attribute('label','/dev/RedundantVolumeGroup/DRBDContainer\r(1TB LVM2 Logical Volume)');
+
+# output
+print $graph->as_ascii();
+#print $graph->as_boxart();
+
+
+sub get_disks {
+# print "(get_disks)\n";
+ $tmp = `ls /dev/sd* /dev/hd* 2>/dev/null|grep -v [0-9]`;
+ @tmp = split(/[\r\n]+/,$tmp);
+ while($line = pop(@tmp)) {
+  if($line ne '') {
+   $tmp2{$line} = $line;
+  }
+ }
+ return keys(%tmp2);
+}
+
+sub get_disk_partitions {
+ my $disk = $_[0];
+# print "(get_disk_partitions:$disk)\n";
+ my @tr;
+ my $output = `ls $disk*|grep -v '^$disk\$'`;
+ @lines = split(/[\r\n]+/,$output);
+ foreach $line (@lines) {
+  if($line ne '') {
+   push(@tr,$line);
+  }
+ }
+ return @tr;
+}
+
+sub get_disk_partition_size {
+ my $disk = $_[0];
+ my $disk_partition = $_[1];
+# print "(get_disk_partition_size:$disk,$disk_partition)\n";
+ my $tr;
+ my $output = `echo "p\nq\n"|fdisk $disk`;
+ @lines = split(/[\r\n]+/,$output);
+
+ # calculate size as follows.
+ #  - get units ("...= 512 bytes")
+ ($bytes_per_unit) = $output =~ /= (\d+) bytes$/ms;
+# print " (unit size = $bytes_per_unit bytes)\n";
+ #  - get partition start and end
+ ($part_start,$part_end) = $output =~ /^$disk_partition +(\d+) +(\d+)/ms;
+# print " (start @ $part_start, end @ $part_end)\n";
+ #  - calculate difference between partition start and end
+ $size_in_units = $part_end-$part_start;
+# print " (size in units = $size_in_units)\n";
+ #  - multiply difference by bytes per unit = size in bytes
+ $size_in_bytes = $bytes_per_unit * $size_in_units;
+# print " (size in bytes = $size_in_bytes)\n";
+ #  - return human readable
+ $human_size = format_bytes($size_in_bytes,bs => 1000,si=>1);
+ $human_size =~ s/\.0(\D)/$1/;
+# print " (size = $human_size)\n";
+ return $human_size;
+
+ # Example output from which we extract information...
+ #
+ # Command (m for help): 
+ # Disk /dev/sda: 2000.4 GB, 2000398934016 bytes
+ # 255 heads, 63 sectors/track, 243201 cylinders, total 3907029168 sectors
+ # Units = sectors of 1 * 512 = 512 bytes
+ # Sector size (logical/physical): 512 bytes / 512 bytes
+ # I/O size (minimum/optimal): 512 bytes / 512 bytes
+ # Disk identifier: 0x46017ab0
+ #
+ #    Device Boot      Start         End      Blocks   Id  System
+ #    /dev/sda1            2048     1002047      500000   83  Linux
+ #    /dev/sda2         1002048  3907029167  1953013560   83  Linux
+ #
+ #    Command (m for help): 
+}
+
+sub get_disk_partition_detected_fs {
+ my($disk,$disk_partition) = @_;
+ my $tr;
+ chop($tr = `fsck -N /dev/sda2 |tail -n 1 |cut -d ']' -f2 |cut -d ' ' -f2|sed 's/fsck\.//'`);
+ return $tr;
+}
+
+sub get_lvm2_vgs {
+#testnode lvm-graph # vgscan       
+#  Reading all physical volumes.  This may take a while...
+#  Found volume group "VolumeGroup" using metadata type lvm2
+#  Found volume group "RedundantVolumeGroup" using metadata type lvm2
+ my @tr;
+ my $output;
+ my $vg;
+ chop($output= `vgscan`);
+ @lines = split(/[\r\n]+/,$output);
+ foreach $line (@lines) {
+  ($vg) = $line =~ /Found volume group "(.*?)"/;
+  if($vg ne '') {
+   push(@tr,$vg);
+  }
+ }
+ return @tr;
+}
+
+sub get_lvm2_pvs {
+#testnode lvm-graph # pvscan
+#  PV /dev/sdb2                        VG VolumeGroup            lvm2 [1.82 TiB / 838.55 GiB free]
+#  PV /dev/VolumeGroup/DRBDContainer   VG RedundantVolumeGroup   lvm2 [10.00 GiB / 10.00 GiB free]
+#  Total: 2 [1.83 TiB] / in use: 2 [1.83 TiB] / in no VG: 0 [0   ]
+ my @tr;
+ my $output;
+ my $pv;
+ my $vg;
+ my $line;
+ chop($output=`pvscan`);
+ my @lines = split(/[\r\n]+/,$output);
+ foreach $line (@lines) {
+  ($pv,$vg) = $line =~ /PV ([^ ]+) .*?VG ([^ ]+)/;
+  if($pv ne '') {
+   $vgnode = $graph->add_node($vg);
+   $vgnode->set_attribute('label','lvm2 volume group\r/dev/'.$vg);
+   add_vg_lvs($vg);
+   $pvnode = $graph->add_node($pv);
+   #$pvnode->set_attribute('label','lvm2 physical volume\r'.$pv);
+   $graph->add_edge_once($pv,$vg);
+   push(@tr,$pv);
+  }
+ }
+ return @tr;
+}
+
+sub add_vg_lvs {
+ my $vg = $_[0];
+ my $lv;
+ my $line;
+ my $output;
+ if(! -e "/dev/$vg/") { return; }
+ chop(my $output = `ls /dev/$vg/`);
+ my @lines = split(/[\r\n]+/,$output);
+ foreach $line (@lines) {
+  $lv = '/dev/'.$vg.'/'. $line;
+  $lvnode = $graph->add_node($lv);
+  $graph->add_edge_once($vg,$lv);
+  $lvnode->set_attribute('label','lvm2 logical volume\r'.$lv);
+ }
+}
+
+sub add_drbd_resources {
+ my $output;
+ my $drbd_resource;
+ chop($output = `ls /dev/drbd/by-res/`);
+ my @lines = split(/[\r\n]+/,$output);
+ foreach $drbd_resource (@lines) {
+  my $drbd_resource_device_name = readlink('/dev/drbd/by-res/'.$drbd_resource);
+  $drbd_resource_device_name =~ s/^\.\.\/\.\./\/dev/;
+  chop(my $newoutput = `drbdsetup /dev/drbd/by-res/$drbd_resource show`); # |grep '^\s.*disk' |grep -v meta-disk |cut -d '"' -f2`);
+  (my $drbd_resource_backing_disk) = $newoutput =~ /disk\s+"(.*?)"/ms;
+  # connect 
+  $drbdnode = $graph->add_node($drbd_resource_device_name);
+  $drbdnode->set_attribute('label','drbd resource\r'.$drbd_resource_device_name.'\r('.$drbd_resource.')');
+  $edge = $graph->add_edge_once($drbd_resource_backing_disk,$drbd_resource_device_name);
+  #$edge->set_attribute('style','double');
+  $edge = $graph->add_edge_once($drbd_resource_device_name,$drbd_resource_backing_disk); # make bidirectional
+  #$edge->set_attribute('style','double');
+ }
+}
+
+sub add_md_arrays {
+ my $output;
+ my $md_array;
+ my $found = 0;
+ chop($output = `cat /proc/mdstat`);
+ my @lines = split(/[\r\n]+/,$output);
+ foreach $line (@lines) {
+  (my $md_array,my $personality,my $array_members) = $line =~ /^(md\d+) +: \w+ (\w+) (.*?)$/;
+  if($md_array ne '') {
+   if($found == 0) {
+    $raid = $graph->add_group('raid arrays');
+   }
+   $array_members =~ s/\[.*?\]//g;
+   $md_node = $graph->add_node('/dev/' . $md_array);
+   $raid->add_member($md_node);
+   # get name of array
+   chop(my $md_array_name = `mdadm --detail /dev/$md_array |grep Name|cut -d ':' -f2-|sed 's/^ *//'|cut -d ' ' -f1|sed 's/^.*://'`);
+   $md_node->set_attribute('label',$personality . ' array\r/dev/'.$md_array.'\r('.$md_array_name.')');
+   foreach $member (split(' ',$array_members)) {
+    $member_node = $graph->add_node('/dev/' . $member);
+    $member_node->set_attribute('label',$personality . ' array member\r/dev/' . $member);
+    $edge = $graph->add_edge_once($member_node,$md_node);
+   }
+  }
+ }
+}
