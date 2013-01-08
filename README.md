@@ -20,6 +20,18 @@ Issues
  * Full of assumptions
  * Needs loving.
 
+Dependencies
+------------
+ * Perl
+    * Graph::Easy
+    * POSIX
+    * Number::Bytes::Human
+ * System-level
+    * hdparm
+    * LVM2 userland utilities
+    * df
+    * Normal (POSIXy) grep, sed, etc.
+
 Sample output
 -------------
 This output shows a system where there are two primary physical SATA volumes, ''/dev/sda'' and ''/dev/sdb''.  Each of these have two partitions.  One of these partitions, ''/dev/sdb2'', is used as the basis for an LVM2 volume group, ''/dev/VolumeGroup''.  On top of this volume group rests an LVM2 volume called ''/dev/VolumeGroup/DRBDContainer'', which contains the DRBD volume ''/dev/drbd/drbd1'' (resource id ''r0'').
