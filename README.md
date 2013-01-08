@@ -7,6 +7,15 @@ storage subsystem on a Linux system.
 It would not be too hard to extend it to support other types of
 unix platforms.
 
+Design Notes
+------------
+This was written as a practical hack. I was rather surprised to
+find no cross-platform way of querying for such information
+already available under perl; or indeed any other standard UNIX
+scripting language, as far as I could tell at the time.  There
+may well be something out there; I just didn't find it, and
+needed some more exotic support (DRBD, nested LVM2, etc.)
+
 Subsystems Supported
 --------------------
  * Linux physical devices (SATA and IDE-only at this stage)
