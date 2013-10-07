@@ -50,6 +50,9 @@ foreach $disk (@disks) {
 
 # Physical Disk Partitions
 foreach $disk (@disks) {
+ # current code is kernel based .. could consider:
+ #   - 'partprobe -ds' (actual partitions from disk)
+ #   - 'parted -lms'   (machine parseable all-disks view including human readable sizes, partition types, etc.)
  @disk_partitions = get_disk_partitions($disk);
  foreach $disk_partition (@disk_partitions) {
   #print "disk partition $disk_partition\n";
