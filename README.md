@@ -25,6 +25,8 @@ Subsystems Supported
 
 Issues
 ------
+ * Only works on PC partition tables (not GPT)
+ * Errors if no RAID present
  * Presently not well tested on other environments
  * Full of assumptions
  * Needs loving.
