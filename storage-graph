@@ -1,5 +1,8 @@
 #!/usr/bin/perl -s
 
+# storage-graph
+#  visualize the storage subsystem on a linux machine
+
 use Graph::Easy;
 use POSIX qw(ceil);
 use Number::Bytes::Human qw(format_bytes);
@@ -7,7 +10,8 @@ use Number::Bytes::Human qw(format_bytes);
 # needs
 #  - unix-like environment
 #  - hdparm (disk size detection)
-#  - fdisk for linux (partition size detection)
+#  - fdisk (for PC disk label partition size detection)
+#  - partprobe (part of GNU parted; for GPT disk label partition size detection)
 #  - above perl modules, ie. 
 #     perl -MCPAN -e shell
 #      cpan> install Graph::Easy
@@ -226,6 +230,7 @@ sub add_vg_lvs {
 }
 
 sub add_drbd_resources {
+ if(! -e('/dev/drbd')) { return(); }
  my $output;
  my $drbd_resource;
  chop($output = `ls /dev/drbd/by-res/`);
@@ -246,6 +251,7 @@ sub add_drbd_resources {
 }
 
 sub add_md_arrays {
+ if(! -e('/proc/mdstat')) { return; }
  my $output;
  my $md_array;
  my $found = 0;
