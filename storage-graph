@@ -8,6 +8,10 @@ use Number::Bytes::Human qw(format_bytes);
 #  - unix-like environment
 #  - hdparm (disk size detection)
 #  - fdisk for linux (partition size detection)
+#  - above perl modules, ie. 
+#     perl -MCPAN -e shell
+#      cpan> install Graph::Easy
+#      cpan> install Number::Bytes::Human
 
 $graph = Graph::Easy->new();
 
